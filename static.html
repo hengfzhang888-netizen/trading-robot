@@ -197,14 +197,61 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 <!-- 手动干预面板（默认隐藏，切到手动模式显示） -->
 <div class="card" id="manualPanel" style="display:none;">
 <h2>✋ 手动交易</h2>
-<p style="color:#888; font-size:13px; margin-bottom:10px;">手动买入/卖出 · 设置止盈止损，系统自动帮你卖</p>
-<div style="display:flex;gap:8px;margin-bottom:10px;">
-<input id="manualSymbol" placeholder="股票代码，如 AAPL" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
-<input id="manualQty" type="number" placeholder="数量" style="width:100px;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
-<button onclick="manualBuy()" style="padding:10px 18px;background:#4CAF50;color:white;border:none;border-radius:6px;cursor:pointer;">买入</button>
-<button onclick="manualSell()" style="padding:10px 18px;background:#f44336;color:white;border:none;border-radius:6px;cursor:pointer;">卖出</button>
+<p style="color:#888; font-size:13px; margin-bottom:10px;">选股票 → 选期权 → 设止盈止损 → 系统按 GDC 信号自动买卖</p>
+
+<!-- 选股票 -->
+<div style="margin-bottom:12px;">
+<label style="color:#aaa;font-size:13px;">1. 选股票</label>
+<div style="display:flex;gap:8px;margin-top:4px;">
+<input id="manualSymbol" placeholder="股票代码，如 TSLA" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<button onclick="loadOptionChain()" style="padding:10px 16px;background:#2196F3;color:white;border:none;border-radius:6px;cursor:pointer;">查看期权</button>
 </div>
-<p style="color:#888;font-size:12px;">提示：在持仓列表里，每个持仓下面可以设置止盈 % 和止损 %，到了自动卖。</p>
+</div>
+
+<!-- 选期权 -->
+<div style="margin-bottom:12px;">
+<label style="color:#aaa;font-size:13px;">2. 选期权合约（点选）</label>
+<div id="optionChainList" style="margin-top:4px;max-height:200px;overflow-y:auto;background:#111;border-radius:6px;padding:8px;">
+<div style="color:#888;font-size:13px;">输入股票代码后点"查看期权"</div>
+</div>
+</div>
+
+<!-- 设止盈止损 -->
+<div style="margin-bottom:12px;">
+<label style="color:#aaa;font-size:13px;">3. 设止盈止损（%）</label>
+<div style="display:flex;gap:8px;margin-top:4px;">
+<input id="manualTP" type="number" placeholder="止盈 %，如 30" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<input id="manualSL" type="number" placeholder="止损 %，如 10" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+</div>
+</div>
+
+<!-- 买入卖出 -->
+<div style="display:flex;gap:8px;margin-bottom:10px;">
+<input id="manualQty" type="number" placeholder="数量" value="1" style="width:100px;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<button onclick="manualBuy()" style="flex:1;padding:12px;background:#4CAF50;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">买入 Call</button>
+<button onclick="manualSell()" style="flex:1;padding:12px;background:#f44336;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">卖出 / 买 Put</button>
+</div>
+<p style="color:#888;font-size:12px;">逻辑：GDC 红 → 买 Call，GDC 绿 → 买 Put。止盈止损到了自动卖。持仓列表里也可单独设每个仓的止盈止损。</p>
+</div>
+
+<!-- 交易时段设置 -->
+<div class="card">
+<h2>🕐 交易时段</h2>
+<p style="color:#888;font-size:13px;margin-bottom:10px;">设置机器人只在什么时间段交易</p>
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+<select id="sessionMode" style="padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<option value="all_day">盘中全时段（开盘到收盘）</option>
+<option value="custom">自定义时段</option>
+<option value="off">今天不交易</option>
+</select>
+</div>
+<div id="customSession" style="display:none;gap:8px;">
+<input id="sessionStart" type="time" value="09:30" style="padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<span style="color:#888;">到</span>
+<input id="sessionEnd" type="time" value="16:00" style="padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+</div>
+<button onclick="saveSession()" style="margin-top:8px;padding:10px 20px;background:#2196F3;color:white;border:none;border-radius:6px;cursor:pointer;">保存时段</button>
+<p style="color:#888;font-size:12px;margin-top:8px;">时段只控制开新仓。时段外不開新倉，已有倉位等 GDC 變色再賣，不強制平倉。</p>
 </div>
 </div>
 
@@ -394,6 +441,48 @@ function setMode(mode) {
     const manualPanel = document.getElementById('manualPanel');
     if (manualPanel) manualPanel.style.display = mode === 'manual' ? 'block' : 'none';
 }
+
+// 加载期权链
+async function loadOptionChain() {
+    const symbol = document.getElementById('manualSymbol').value.trim().toUpperCase();
+    if (!symbol) { alert('请填写股票代码'); return; }
+    const el = document.getElementById('optionChainList');
+    el.innerHTML = '<div style="color:#888;">加载中...</div>';
+    try {
+        const r = await fetch(API_URL + '/api/option_chain?symbol=' + symbol);
+        const d = await r.json();
+        if (!d.ok) { el.innerHTML = '<div style="color:#f44336;">' + d.error + '</div>'; return; }
+        const chain = d.chain || {};
+        const exps = chain.expirations || [];
+        if (exps.length === 0) { el.innerHTML = '<div style="color:#888;">无期权合约</div>'; return; }
+        // 显示第一个到期日的合约（简化）
+        el.innerHTML = '<div style="color:#4CAF50;font-size:13px;margin-bottom:6px;">到期日: ' + exps[0] + '（点选一个合约）</div>';
+        // 这里显示提示，用户点选后系统会用该合约
+        el.innerHTML += '<div style="color:#aaa;font-size:13px;">已加载期权链，系统将按平值附近 (±1%) 自动选合约<br>或在下方手动输入行权价</div>';
+        el.innerHTML += '<div style="display:flex;gap:8px;margin-top:8px;"><input id="manualStrike" type="number" placeholder="行权价，如 250" style="flex:1;padding:8px;border-radius:4px;border:1px solid #444;background:#222;color:#fff;"><select id="manualRight" style="padding:8px;border-radius:4px;border:1px solid #444;background:#222;color:#fff;"><option value="CALL">Call</option><option value="PUT">Put</option></select></div>';
+    } catch (e) {
+        el.innerHTML = '<div style="color:#f44336;">加载失败</div>';
+    }
+}
+
+// 保存交易时段
+async function saveSession() {
+    const mode = document.getElementById('sessionMode').value;
+    const start = document.getElementById('sessionStart').value;
+    const end = document.getElementById('sessionEnd').value;
+    const r = await fetch(API_URL + '/api/trading_session', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode, start_time: start, end_time: end})});
+    const d = await r.json();
+    if (d.ok) alert('交易时段已保存: ' + (mode === 'all_day' ? '盘中全时段' : mode === 'off' ? '今天不交易' : start + ' - ' + end));
+    else alert('保存失败: ' + d.error);
+}
+// 时段模式切换时显示/隐藏自定义时间
+document.addEventListener('DOMContentLoaded', function() {
+    const sel = document.getElementById('sessionMode');
+    if (sel) sel.addEventListener('change', function() {
+        const custom = document.getElementById('customSession');
+        if (custom) custom.style.display = this.value === 'custom' ? 'flex' : 'none';
+    });
+});
 
 // 手动买入
 async function manualBuy() {
