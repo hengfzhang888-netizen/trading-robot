@@ -121,23 +121,40 @@ class TigerClient:
         if not self._connected:
             logger.warning(f"Not connected, cannot fetch quote for {symbol}")
             return None
+        # 方法1：尝试 get_stock_briefs
         try:
             from tigeropen.quote.quote_client import QuoteClient
             client = QuoteClient(self._client)
-            # tigeropen QuoteClient.get_stock_briefs or similar
             briefs = client.get_stock_briefs([symbol])
             if briefs:
                 b = briefs[0]
+                price = getattr(b, 'latest_price', None)
+                if price:
+                    return {
+                        'symbol': symbol,
+                        'price': price,
+                        'change_pct': getattr(b, 'change_rate', 0),
+                        'volume': getattr(b, 'volume', 0),
+                    }
+        except Exception as e:
+            logger.warning(f"get_stock_briefs failed for {symbol}: {e}, 尝试 K线 fallback")
+        # 方法2：Fallback 用 K线最新收盘价
+        try:
+            kline = self.get_kline(symbol, period='1min', limit=2)
+            if kline and kline.get('close'):
+                closes = kline['close']
+                price = closes[-1]
+                prev = closes[-2] if len(closes) > 1 else price
+                change_pct = ((price - prev) / prev * 100) if prev else 0
                 return {
                     'symbol': symbol,
-                    'price': getattr(b, 'latest_price', None),
-                    'change_pct': getattr(b, 'change_rate', None),
-                    'volume': getattr(b, 'volume', None),
+                    'price': price,
+                    'change_pct': change_pct,
+                    'volume': kline.get('volume', [0])[-1] if kline.get('volume') else 0,
                 }
-            return None
         except Exception as e:
-            logger.error(f"get_quote failed for {symbol}: {type(e).__name__}: {e}")
-            return None
+            logger.error(f"get_quote K线 fallback failed for {symbol}: {e}")
+        return None
 
     def get_kline(self, symbol: str, period: str = '15min',
                   limit: int = 100) -> Optional[Dict[str, List[float]]]:

@@ -184,17 +184,40 @@ def quotes():
                 client = TigerClient(tiger_id, private_key, account_num)
         except Exception as e:
             logger.error(f"quotes client error: {e}")
-    if not client:
-        return jsonify({'ok': False, 'error': '未配置 Tiger API'}), 400
+    # 即使没有 Tiger 配置，也要试雅虎（显示用）
     results = {}
+    errors = []
     for sym in symbols:
+        # 先试老虎（如果已配置）
+        if client and client.is_connected:
+            try:
+                q = client.get_quote(sym)
+                if q and q.get('price'):
+                    results[sym] = q
+                    continue
+            except Exception as e:
+                logger.warning(f"Tiger quote {sym} failed: {e}")
+        # 老虎失败，Fallback 用雅虎（显示用，1分钟够了）
         try:
-            q = client.get_quote(sym)
-            if q:
-                results[sym] = q
+            import urllib.request, json
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1d&interval=1m"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.loads(r.read())
+                result = data['chart']['result'][0]
+                meta = result['meta']
+                price = meta.get('regularMarketPrice')
+                prev = meta.get('chartPreviousClose') or meta.get('previousClose')
+                if price:
+                    change_pct = ((price - prev) / prev * 100) if prev else 0
+                    results[sym] = {'symbol': sym, 'price': price, 'change_pct': change_pct, 'volume': 0, 'source': 'yahoo'}
+                    continue
         except Exception as e:
-            logger.error(f"quote {sym} error: {e}")
-    return jsonify({'ok': True, 'quotes': results})
+            logger.warning(f"Yahoo quote {sym} failed: {e}")
+        errors.append(f"{sym}: 无法获取报价")
+    if not results and errors:
+        return jsonify({'ok': False, 'error': '; '.join(errors)}), 400
+    return jsonify({'ok': True, 'quotes': results, 'warnings': errors})
 
 @app.route('/api/account', methods=['GET'])
 def account():
@@ -216,7 +239,9 @@ def account():
             logger.error(f"account client create error: {e}")
             return jsonify({'ok': False, 'error': '未配置 Tiger API，请先保存配置'}), 400
     if not client:
-        return jsonify({'ok': False, 'error': '未配置 Tiger API，请先保存配置'}), 400
+        return jsonify({'ok': False, 'error': '未配置 Tiger API，请点保存配置'}), 400
+    if not client.is_connected:
+        return jsonify({'ok': False, 'error': 'Tiger 连接失败：私钥可能不正确或格式不对，请检查私钥（需完整复制，含 BEGIN/END）'}), 400
     try:
         acc = client.get_account()
         if acc:
