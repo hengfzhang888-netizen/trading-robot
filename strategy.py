@@ -95,39 +95,118 @@ def calculate_ladder(highs, lows, closes, n=26):
     else:
         return "blue"  # 横盘震荡
 
-def check_signal(prices, highs, lows, closes):
+def _is_scalping_timeframe(timeframe: str) -> bool:
+    """判断是否为 1 分钟以内的短线（10/15/30/45秒、1分钟）"""
+    tf = (timeframe or '').lower().strip()
+    return tf in ('10sec', '10s', '15sec', '15s', '30sec', '30s', '45sec', '45s', '1min', '1m')
+
+def _get_gdc_trend(prices):
+    """计算 GDC 趋势：上升 / 下降 / 平（用于短线判断）
+    返回: (gdc_index, gdc_color, trend, trend_strength)
+    trend: 'up' / 'down' / 'flat'
+    trend_strength: 0.0-1.0，变化幅度越大越强
     """
-    检查三层过滤信号
-    返回: ("CALL" / "PUT" / "HOLD", 详情字典)
+    gdc_index, gdc_color = calculate_gdc(prices)
+    if gdc_index is None:
+        return None, None, 'flat', 0.0
+    # 计算 GDC 的变化：用最近 3 个点的斜率
+    # 这里简化：用当前值与前值比较，配合颜色判断
+    # 实际实现中，calculate_gdc 返回的颜色已包含涨跌信息
+    # trend_strength 用 GDC 偏离 50 的程度估算
+    if gdc_color == 'magenta':
+        trend = 'up'
+        # GDC 越接近 80 越强，越接近 50 越弱
+        strength = min(1.0, abs(gdc_index - 50) / 30.0)
+    else:
+        trend = 'down'
+        strength = min(1.0, abs(gdc_index - 50) / 30.0)
+    # 如果 GDC 在 45-55 之间，视为平（无动能），不交易
+    if 45 <= gdc_index <= 55 and strength < 0.2:
+        trend = 'flat'
+        strength = 0.0
+    return gdc_index, gdc_color, trend, strength
+
+def check_signal(prices, highs, lows, closes, timeframe='15min'):
+    """
+    检查信号（双模式）
+    - 1分钟以内短线：GDC 为主，梯子颜色为辅（GDC 趋势决定方向，梯子颜色决定仓位）
+    - 1分钟以上波段：三层过滤全一致才交易（严格模式）
+    返回: ("CALL" / "PUT" / "HOLD", 详情字典，含 position_size_ratio)
     """
     # 计算GDC
     gdc_index, gdc_color = calculate_gdc(prices)
     if gdc_index is None:
-        return "HOLD", {"reason": "数据不足"}
-    
+        return "HOLD", {"reason": "数据不足"}, 0.0
+
     # 计算GD（与GDC相同）
     gd_index = gdc_index
-    
-    # 计算梯子
+
+    # 计算梯子（颜色）
     ladder = calculate_ladder(highs, lows, closes)
-    
+
     detail = {
         "gdc_index": round(gdc_index, 2),
         "gdc_color": gdc_color,
         "gd_index": round(gd_index, 2),
         "ladder": ladder,
+        "timeframe": timeframe,
     }
-    
-    # 三层过滤
+
+    # === 短线模式：1分钟以内（10/15/30/45秒、1分钟）===
+    if _is_scalping_timeframe(timeframe):
+        gdc_idx, _, gdc_trend, _ = _get_gdc_trend(prices)
+        detail['mode'] = 'scalping'
+        detail['gdc_trend'] = gdc_trend
+
+        # 风险规避：GDC 平（无动能）不交易
+        if gdc_trend == 'flat':
+            detail['reason'] = 'GDC 平，无动能，避开'
+            return "HOLD", detail, 0.0
+
+        # GDC 上升 → 买 Call
+        if gdc_trend == 'up':
+            # 梯子洋红（顺势）= 全仓
+            if ladder == 'magenta':
+                detail['reason'] = 'GDC 上升 + 梯子洋红，顺势买 Call'
+                return "CALL", detail, 1.0
+            # 梯子绿色（逆势抢反弹）= 半仓，快进快出
+            if ladder == 'green':
+                detail['reason'] = 'GDC 上升 + 梯子绿色，逆势抢反弹买 Call（半仓）'
+                return "CALL", detail, 0.5
+            # 梯子蓝色（横盘）= 小仓
+            detail['reason'] = 'GDC 上升 + 梯子蓝色，横盘反弹买 Call（小仓）'
+            return "CALL", detail, 0.3
+
+        # GDC 下降 → 买 Put
+        if gdc_trend == 'down':
+            # 梯子绿色（顺势）= 全仓
+            if ladder == 'green':
+                detail['reason'] = 'GDC 下降 + 梯子绿色，顺势买 Put'
+                return "PUT", detail, 1.0
+            # 梯子洋红（逆势抢回调）= 半仓
+            if ladder == 'magenta':
+                detail['reason'] = 'GDC 下降 + 梯子洋红，逆势抢回调买 Put（半仓）'
+                return "PUT", detail, 0.5
+            # 梯子蓝色 = 小仓
+            detail['reason'] = 'GDC 下降 + 梯子蓝色，横盘回调买 Put（小仓）'
+            return "PUT", detail, 0.3
+
+        return "HOLD", detail, 0.0
+
+    # === 波段模式：1分钟以上（严格三层过滤）===
+    detail['mode'] = 'swing'
     # 买Call：梯子洋红 + GDC洋红 + GD < 20
     if ladder == "magenta" and gdc_color == "magenta" and gd_index < 20:
-        return "CALL", detail
-    
+        detail['reason'] = '三层全一致，买 Call'
+        return "CALL", detail, 1.0
+
     # 买Put：梯子绿色 + GDC绿色 + GD > 80
     if ladder == "green" and gdc_color == "green" and gd_index > 80:
-        return "PUT", detail
-    
-    return "HOLD", detail
+        detail['reason'] = '三层全一致，买 Put'
+        return "PUT", detail, 1.0
+
+    detail['reason'] = '三层不一致，不交易'
+    return "HOLD", detail, 0.0
 
 def check_option_filter(iv_rank, days_to_expiry, iv_threshold=30, min_days=30):
     """

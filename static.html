@@ -6,7 +6,11 @@
 <title>华尔街大拿 - 期权波段交易机器人</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0a0e1a; color: #e0e0e0; padding: 20px; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0a0e1a; color: #e0e0e0; padding: 20px; transition: background 0.3s, color 0.3s; }
+body.light-mode { background: #f5f5f5; color: #333; }
+body.light-mode .card { background: #fff; color: #333; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+body.light-mode input, body.light-mode select { background: #fff !important; color: #333 !important; border-color: #ddd !important; }
+body.light-mode .status-item { background: #eee; }
 .container { max-width: 1200px; margin: 0 auto; }
 h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 .subtitle { text-align: center; color: #888; margin-bottom: 30px; }
@@ -38,16 +42,48 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 .log-line.warn { color: #ffab00; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .status { flex-direction: column; } }
+/* New: tables, signals, close-all */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th { text-align: left; color: #888; padding: 8px 6px; border-bottom: 1px solid #2a2f3e; font-weight: normal; }
+.data-table td { padding: 8px 6px; border-bottom: 1px solid #1a1f2e; }
+.data-table tr:last-child td { border-bottom: none; }
+.empty { color: #888; font-size: 13px; padding: 10px 0; }
+.sig-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid #1a1f2e; font-size: 13px; }
+.sig-row:last-child { border-bottom: none; }
+.sig-symbol { font-weight: bold; color: #ffd700; min-width: 60px; }
+.sig-pill { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+.sig-call { background: #00c853; color: #fff; }
+.sig-put { background: #ff1744; color: #fff; }
+.sig-hold { background: #2a2f3e; color: #aaa; }
+.sig-magenta { color: #ff00ff; }
+.sig-green { color: #00c853; }
+.sig-blue { color: #64b5f6; }
+.btn-close-all { background: #ff1744; color: #fff; width: 100%; padding: 14px; font-size: 17px; margin-top: 12px; }
+.btn-close-all:disabled { opacity: 0.5; cursor: not-allowed; }
+.positive { color: #00c853; }
+.negative { color: #ff1744; }
 </style>
 </head>
 <body>
 <div class="container">
+<div style="display:flex;justify-content:space-between;align-items:center;">
 <h1>🦁 华尔街大拿</h1>
+<button onclick="toggleTheme()" id="themeBtn" style="padding:8px 16px;border:none;border-radius:20px;cursor:pointer;background:#333;color:#fff;font-size:14px;">🌙 晚上</button>
+</div>
 <p class="subtitle">期权波段交易机器人 · 模拟盘 · Tiger Securities</p>
+
+<!-- 模式切换：AI自动 / 手动干预 -->
+<div style="display:flex;gap:10px;margin:15px 0;">
+<button id="modeAutoBtn" onclick="setMode('auto')" style="flex:1;padding:14px;font-size:18px;font-weight:bold;border:none;border-radius:8px;cursor:pointer;background:#4CAF50;color:white;">🤖 AI 自动交易</button>
+<button id="modeManualBtn" onclick="setMode('manual')" style="flex:1;padding:14px;font-size:18px;font-weight:bold;border:none;border-radius:8px;cursor:pointer;background:#666;color:white;">✋ 手动干预</button>
+</div>
+<div id="modeDesc" style="text-align:center;color:#aaa;font-size:14px;margin-bottom:15px;">当前模式：AI 自动交易 - AI 自己看指标，自己买卖</div>
 
 <div class="status">
 <div class="status-item"><div class="label">机器人状态</div><div class="value" id="status">已停止</div></div>
 <div class="status-item"><div class="label">今日盈亏</div><div class="value" id="pnl">$0.00</div></div>
+<div class="status-item"><div class="label">总盈亏（含浮亏）</div><div class="value" id="totalPnl">$0.00</div></div>
+<div class="status-item"><div class="label">胜率</div><div class="value" id="winRate">—</div></div>
 <div class="status-item"><div class="label">持仓数量</div><div class="value" id="positions">0</div></div>
 <div class="status-item"><div class="label">今日交易</div><div class="value" id="trades">0</div></div>
 </div>
@@ -96,6 +132,10 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 <label>期权最短到期天数</label>
 <input type="number" id="minDays" value="30" min="7" max="90">
 </div>
+<div class="form-group">
+<label>单仓止损 %（亏损达到即强制平仓，硬性）</label>
+<input type="number" id="stopLossPct" value="15" min="1" max="100" step="1">
+</div>
 </div>
 
 <div class="card">
@@ -137,11 +177,44 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 <button class="btn btn-start" id="startBtn" onclick="startRobot()">▶ 开始交易</button>
 <button class="btn btn-stop" id="stopBtn" onclick="stopRobot()" disabled>⏹ 停止</button>
+<button class="btn btn-close-all" id="closeAllBtn" onclick="closeAllPositions()">🔴 一键平仓（平掉全部持仓）</button>
+</div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>📡 实时信号</h2>
+<p style="color:#888; font-size:13px; margin-bottom:10px;">GDC/GD/梯子三层过滤 · 机器人运行时每 5 秒刷新</p>
+<div id="signalsList"><div class="empty">机器人未运行，暂无信号</div></div>
+</div>
+
+<div class="card">
+<h2>💼 当前持仓</h2>
+<p style="color:#888; font-size:13px; margin-bottom:10px;">模拟盘持仓 · 浮动盈亏实时更新</p>
+<div id="positionsList"><div class="empty">暂无持仓</div></div>
+</div>
+
+<!-- 手动干预面板（默认隐藏，切到手动模式显示） -->
+<div class="card" id="manualPanel" style="display:none;">
+<h2>✋ 手动交易</h2>
+<p style="color:#888; font-size:13px; margin-bottom:10px;">手动买入/卖出 · 设置止盈止损，系统自动帮你卖</p>
+<div style="display:flex;gap:8px;margin-bottom:10px;">
+<input id="manualSymbol" placeholder="股票代码，如 AAPL" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<input id="manualQty" type="number" placeholder="数量" style="width:100px;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<button onclick="manualBuy()" style="padding:10px 18px;background:#4CAF50;color:white;border:none;border-radius:6px;cursor:pointer;">买入</button>
+<button onclick="manualSell()" style="padding:10px 18px;background:#f44336;color:white;border:none;border-radius:6px;cursor:pointer;">卖出</button>
+</div>
+<p style="color:#888;font-size:12px;">提示：在持仓列表里，每个持仓下面可以设置止盈 % 和止损 %，到了自动卖。</p>
 </div>
 </div>
 
 <div class="card">
-<h2>📋 交易记录</h2>
+<h2>📜 交易记录</h2>
+<div id="tradesList"><div class="empty">暂无交易记录</div></div>
+</div>
+
+<div class="card">
+<h2>📋 运行日志</h2>
 <div class="log" id="log"></div>
 </div>
 
@@ -273,6 +346,85 @@ function saveConfigManually() {
     }
 }
 
+// === 白天/晚上主题切换 ===
+function toggleTheme() {
+    const body = document.body;
+    const btn = document.getElementById('themeBtn');
+    if (body.classList.contains('light-mode')) {
+        body.classList.remove('light-mode');
+        btn.textContent = '🌙 晚上';
+        btn.style.background = '#333';
+        localStorage.setItem('theme', 'dark');
+    } else {
+        body.classList.add('light-mode');
+        btn.textContent = '☀️ 白天';
+        btn.style.background = '#ffd700';
+        btn.style.color = '#333';
+        localStorage.setItem('theme', 'light');
+    }
+}
+// 页面加载时恢复主题
+(function() {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'light') {
+        document.body.classList.add('light-mode');
+        const btn = document.getElementById('themeBtn');
+        if (btn) { btn.textContent = '☀️ 白天'; btn.style.background = '#ffd700'; btn.style.color = '#333'; }
+    }
+})();
+
+// === 模式切换：AI自动 / 手动干预 ===
+let currentMode = 'auto';
+function setMode(mode) {
+    currentMode = mode;
+    const autoBtn = document.getElementById('modeAutoBtn');
+    const manualBtn = document.getElementById('modeManualBtn');
+    const desc = document.getElementById('modeDesc');
+    if (mode === 'auto') {
+        autoBtn.style.background = '#4CAF50';
+        manualBtn.style.background = '#666';
+        desc.textContent = '当前模式：AI 自动交易 - AI 自己看指标，自己买卖';
+    } else {
+        autoBtn.style.background = '#666';
+        manualBtn.style.background = '#FF9800';
+        desc.textContent = '当前模式：手动干预 - 你自己决定买什么，设置止盈止损，系统自动帮你卖';
+    }
+    fetch(API_URL + '/api/mode', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: mode})});
+    // 显示/隐藏手动交易面板
+    const manualPanel = document.getElementById('manualPanel');
+    if (manualPanel) manualPanel.style.display = mode === 'manual' ? 'block' : 'none';
+}
+
+// 手动买入
+async function manualBuy() {
+    const symbol = document.getElementById('manualSymbol').value.trim().toUpperCase();
+    const qty = parseInt(document.getElementById('manualQty').value);
+    if (!symbol || !qty || qty <= 0) { alert('请填写股票代码和数量'); return; }
+    const r = await fetch(API_URL + '/api/manual_buy', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({symbol, quantity: qty})});
+    const d = await r.json();
+    alert(d.ok ? '买入成功，订单号 ' + d.order_id : '买入失败：' + d.error);
+    loadPositions();
+}
+// 手动卖出
+async function manualSell() {
+    const symbol = document.getElementById('manualSymbol').value.trim().toUpperCase();
+    const qty = parseInt(document.getElementById('manualQty').value);
+    if (!symbol || !qty || qty <= 0) { alert('请填写股票代码和数量'); return; }
+    const r = await fetch(API_URL + '/api/manual_sell', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({symbol, quantity: qty})});
+    const d = await r.json();
+    alert(d.ok ? '卖出成功，订单号 ' + d.order_id : '卖出失败：' + d.error);
+    loadPositions();
+}
+// 设置某个持仓的止盈止损
+async function setPositionTpSl(symbol) {
+    const tp = document.getElementById('tp_' + symbol).value;
+    const sl = document.getElementById('sl_' + symbol).value;
+    const r = await fetch(API_URL + '/api/set_tp_sl', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({symbol, tp_pct: tp ? parseFloat(tp) : null, sl_pct: sl ? parseFloat(sl) : null})});
+    const d = await r.json();
+    if (d.ok) alert(symbol + ' 止盈止损已设置');
+    else alert('设置失败：' + d.error);
+}
+
 function saveConfig() {
     const tigerId = document.getElementById('tigerId').value.trim();
     const appId = document.getElementById('appId').value.trim();
@@ -284,15 +436,16 @@ function saveConfig() {
     const maxLoss = document.getElementById('maxLoss').value;
     const ivThreshold = document.getElementById('ivThreshold').value;
     const minDays = document.getElementById('minDays').value;
+    const stopLossPct = document.getElementById('stopLossPct').value;
     const customStocks = document.getElementById('customStocks').value;
     // Save to localStorage (for sandbox)
-    localStorage.setItem('tiger_config', JSON.stringify({ tigerId, appId, privateKey, tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays, customStocks, selectedStocks: Array.from(selectedStocks) }));
+    localStorage.setItem('tiger_config', JSON.stringify({ tigerId, appId, privateKey, tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays, stopLossPct, customStocks, selectedStocks: Array.from(selectedStocks) }));
     // Save to backend (including private key per user request)
     const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
     fetch(`${apiUrl}/api/save_config`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ tigerId, privateKey, symbols: Array.from(selectedStocks), tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays, account: appId })
+        body: JSON.stringify({ tigerId, privateKey, symbols: Array.from(selectedStocks), tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays, stopLossPct, account: appId })
     }).catch(() => {});
 }
 
@@ -329,6 +482,13 @@ async function startRobot() {
         return;
     }
     
+    // 大额确认：单笔金额超过 1000 美元时二次确认
+    const amountVal = parseFloat(document.getElementById('amount').value) || 0;
+    if (amountVal > 1000) {
+        const ok = confirm(`⚠️ 大额确认\n\n单笔交易金额 $${amountVal} 超过 $1000。\n\n模拟盘测试建议先用小金额。\n\n确定要以 $${amountVal} 启动吗？`);
+        if (!ok) return;
+    }
+    
     // 保存配置到本地（不上传服务器）
     saveConfig();
     
@@ -339,6 +499,7 @@ async function startRobot() {
     const maxLoss = document.getElementById('maxLoss').value;
     const ivThreshold = document.getElementById('ivThreshold').value;
     const minDays = document.getElementById('minDays').value;
+    const stopLossPct = document.getElementById('stopLossPct').value;
     
     addLog(`正在连接后端...`, 'info');
     addLog(`交易类型: ${tradeType === 'option' ? '期权' : '个股'}`, 'info');
@@ -355,7 +516,7 @@ async function startRobot() {
             body: JSON.stringify({
                 tigerId, appId, privateKey,
                 symbols: Array.from(selectedStocks),
-                tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays,
+                tradeType, timeframe, amount, maxPositions, maxLoss, ivThreshold, minDays, stopLossPct,
             }),
         });
         const data = await resp.json();
@@ -381,6 +542,178 @@ async function startRobot() {
 }
 
 let pollTimer = null;
+
+// ---------- Dashboard: signals / positions / trades / stats ----------
+
+function fmtMoney(v) {
+    const n = parseFloat(v) || 0;
+    return (n >= 0 ? '$' : '-$') + Math.abs(n).toFixed(2);
+}
+
+function fmtTime(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleString('zh-CN', { hour12: false });
+    } catch (e) { return iso; }
+}
+
+function renderSignals(signals) {
+    const el = document.getElementById('signalsList');
+    if (!el) return;
+    if (!signals || signals.length === 0) {
+        el.innerHTML = '<div class="empty">机器人未运行，暂无信号</div>';
+        return;
+    }
+    el.innerHTML = signals.map(s => {
+        const sig = s.signal || 'HOLD';
+        const pillClass = sig === 'CALL' ? 'sig-call' : (sig === 'PUT' ? 'sig-put' : 'sig-hold');
+        const pillText = sig === 'CALL' ? '买 CALL' : (sig === 'PUT' ? '买 PUT' : '观望 HOLD');
+        const gdcColor = s.gdc_color === 'magenta' ? 'sig-magenta' : (s.gdc_color === 'green' ? 'sig-green' : '');
+        const ladderColor = s.ladder === 'magenta' ? 'sig-magenta' : (s.ladder === 'green' ? 'sig-green' : 'sig-blue');
+        const ladderText = s.ladder === 'magenta' ? '洋红↑' : (s.ladder === 'green' ? '绿色↓' : '蓝色→');
+        const gdcText = s.gdc_index != null ? s.gdc_index : '—';
+        const gdText = s.gd_index != null ? s.gd_index : '—';
+        const priceText = s.price != null ? '$' + parseFloat(s.price).toFixed(2) : '—';
+        return `<div class="sig-row">
+            <span class="sig-symbol">${s.symbol}</span>
+            <span class="sig-pill ${pillClass}">${pillText}</span>
+            <span>现价 ${priceText}</span>
+            <span>GDC <span class="${gdcColor}">${gdcText}</span></span>
+            <span>GD ${gdText}</span>
+            <span>梯子 <span class="${ladderColor}">${ladderText}</span></span>
+        </div>`;
+    }).join('');
+}
+
+function renderPositions(positions) {
+    const el = document.getElementById('positionsList');
+    if (!el) return;
+    if (!positions || positions.length === 0) {
+        el.innerHTML = '<div class="empty">暂无持仓</div>';
+        return;
+    }
+    const rows = positions.map(p => {
+        const pnl = parseFloat(p.unrealized_pnl) || 0;
+        const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+        const qty = p.quantity || 0;
+        const avg = p.avg_cost != null ? '$' + parseFloat(p.avg_cost).toFixed(2) : '—';
+        const mkt = p.market_price != null ? '$' + parseFloat(p.market_price).toFixed(2) : '—';
+        return `<tr><td>${p.symbol || '—'}</td><td>${qty}</td><td>${avg}</td><td>${mkt}</td><td class="${pnlClass}">${fmtMoney(pnl)}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<table class="data-table"><thead><tr><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>浮动盈亏</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderTrades(trades) {
+    const el = document.getElementById('tradesList');
+    if (!el) return;
+    if (!trades || trades.length === 0) {
+        el.innerHTML = '<div class="empty">暂无交易记录</div>';
+        return;
+    }
+    const rows = trades.slice(-50).reverse().map(t => {
+        const side = t.side || t.action || '—';
+        const price = t.price != null ? '$' + parseFloat(t.price).toFixed(2) : '—';
+        const qty = t.quantity || '—';
+        const amount = t.amount != null ? fmtMoney(t.amount) : '—';
+        let kind = t.type === 'option' ? '期权' : (t.type === 'stock' ? '个股' : '—');
+        let sideText = side;
+        if (t.type === 'stop_loss') {
+            kind = '🛑 止损';
+            sideText = side + (t.loss_pct != null ? ` -${t.loss_pct}%` : '');
+        }
+        return `<tr><td>${fmtTime(t.time)}</td><td>${t.symbol || '—'}</td><td>${kind}</td><td>${sideText}</td><td>${price}</td><td>${qty}</td><td>${amount}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<table class="data-table"><thead><tr><th>时间</th><th>标的</th><th>类型</th><th>方向</th><th>价格</th><th>数量</th><th>金额</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderStats(stats) {
+    if (!stats) return;
+    const pnlEl = document.getElementById('pnl');
+    const totalEl = document.getElementById('totalPnl');
+    const winEl = document.getElementById('winRate');
+    const posEl = document.getElementById('positions');
+    const tradesEl = document.getElementById('trades');
+    if (pnlEl) {
+        const d = parseFloat(stats.daily_pnl) || 0;
+        pnlEl.textContent = fmtMoney(d);
+        pnlEl.className = 'value ' + (d >= 0 ? 'green' : 'red');
+    }
+    if (totalEl) {
+        const t = parseFloat(stats.total_pnl) || 0;
+        totalEl.textContent = fmtMoney(t);
+        totalEl.className = 'value ' + (t >= 0 ? 'green' : 'red');
+    }
+    if (winEl) {
+        const w = parseFloat(stats.win_rate);
+        winEl.textContent = (stats.trades_count > 0) ? w.toFixed(1) + '%' : '—';
+        winEl.className = 'value';
+    }
+    if (posEl) posEl.textContent = stats.open_positions != null ? stats.open_positions : 0;
+    if (tradesEl) tradesEl.textContent = stats.trades_count || 0;
+    if (stats.daily_loss_exceeded) {
+        addLog('⚠️ 日最大亏损已达上限，今日不再开新仓', 'warn');
+    }
+}
+
+async function refreshDashboard() {
+    const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
+    try {
+        const [sigResp, posResp, tradeResp, statResp] = await Promise.all([
+            fetch(`${apiUrl}/api/signals`).catch(() => null),
+            fetch(`${apiUrl}/api/positions`).catch(() => null),
+            fetch(`${apiUrl}/api/trades`).catch(() => null),
+            fetch(`${apiUrl}/api/stats`).catch(() => null),
+        ]);
+        if (sigResp && sigResp.ok) {
+            const d = await sigResp.json();
+            renderSignals(d.signals || []);
+        }
+        if (posResp && posResp.ok) {
+            const d = await posResp.json();
+            renderPositions(d.positions || []);
+        }
+        if (tradeResp && tradeResp.ok) {
+            const d = await tradeResp.json();
+            renderTrades(d.trades || []);
+        }
+        if (statResp && statResp.ok) {
+            const d = await statResp.json();
+            renderStats(d);
+        }
+    } catch (e) { /* backend unreachable, keep last render */ }
+}
+
+async function closeAllPositions() {
+    const ok1 = confirm('⚠️ 确认平仓？\n\n将以市价平掉全部持仓（模拟盘）。此操作不可撤销。');
+    if (!ok1) return;
+    const ok2 = confirm('再次确认：真的要平掉全部持仓吗？');
+    if (!ok2) return;
+    const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
+    const btn = document.getElementById('closeAllBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const resp = await fetch(`${apiUrl}/api/close_all`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok || data.closed > 0) {
+            addLog(`✅ 一键平仓完成：平掉 ${data.closed} 个仓位`, 'buy');
+            if (data.errors && data.errors.length) {
+                data.errors.forEach(e => addLog(`平仓错误：${e}`, 'warn'));
+            }
+        } else {
+            const err = (data.errors && data.errors[0]) || data.error || '平仓失败';
+            addLog(`平仓失败：${err}`, 'sell');
+            alert(`平仓失败：${err}`);
+        }
+        await refreshDashboard();
+    } catch (e) {
+        addLog('平仓请求失败：无法连接后端', 'sell');
+        alert('无法连接后端，请检查后端是否运行');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function startPolling() {
     stopPolling();
     pollTimer = setInterval(async () => {
@@ -412,6 +745,8 @@ function startPolling() {
         } catch (e) {
             // Backend unreachable, stop polling silently
         }
+        // Refresh dashboard panels (signals / positions / trades / stats)
+        await refreshDashboard();
     }, 5000);
 }
 function stopPolling() {
@@ -453,6 +788,7 @@ window.onload = async () => {
             if (cfg.max_loss) document.getElementById('maxLoss').value = cfg.max_loss;
             if (cfg.iv_threshold) document.getElementById('ivThreshold').value = cfg.iv_threshold;
             if (cfg.min_days) document.getElementById('minDays').value = cfg.min_days;
+            if (cfg.stop_loss_pct) document.getElementById('stopLossPct').value = cfg.stop_loss_pct;
             if (cfg.symbols) {
                 cfg.symbols.forEach(sym => {
                     selectedStocks.add(sym);
@@ -478,6 +814,7 @@ window.onload = async () => {
         if (cfg.maxLoss) document.getElementById('maxLoss').value = cfg.maxLoss;
         if (cfg.ivThreshold) document.getElementById('ivThreshold').value = cfg.ivThreshold;
         if (cfg.minDays) document.getElementById('minDays').value = cfg.minDays;
+        if (cfg.stopLossPct) document.getElementById('stopLossPct').value = cfg.stopLossPct;
         if (cfg.customStocks) document.getElementById('customStocks').value = cfg.customStocks;
         if (cfg.selectedStocks) {
             cfg.selectedStocks.forEach(sym => {
@@ -489,13 +826,15 @@ window.onload = async () => {
         }
     }
     // 输入时自动保存
-    ['tigerId','appId','privateKey','tradeType','timeframe','amount','maxPositions','maxLoss','ivThreshold','minDays','customStocks'].forEach(id => {
+    ['tigerId','appId','privateKey','tradeType','timeframe','amount','maxPositions','maxLoss','ivThreshold','minDays','stopLossPct','customStocks'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('input', saveConfig);
         if (el) el.addEventListener('change', saveConfig);
     });
     addLog('欢迎使用华尔街大拿交易机器人', 'info');
     addLog('配置已自动保存，下次打开不用重新输入', 'info');
+    // Initial dashboard load (signals / positions / trades / stats)
+    refreshDashboard();
 };
 </script>
 </body>

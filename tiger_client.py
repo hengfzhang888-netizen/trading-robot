@@ -31,11 +31,12 @@ TIMEFRAME_MAP = {
 
 # Poll interval in seconds for each timeframe
 POLL_INTERVAL = {
-    '10sec': 10,
-    '15sec': 15,
-    '30sec': 30,
-    '45sec': 45,
-    '1min': 60,
+    # 短线（1分钟以内）：每 2 秒检查一次，GDC 变色立刻反应，不迟疑
+    '10sec': 2,
+    '15sec': 2,
+    '30sec': 2,
+    '45sec': 2,
+    '1min': 2,
     '3min': 180,
     '5min': 300,
     '15min': 900,

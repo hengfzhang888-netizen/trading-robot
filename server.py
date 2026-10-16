@@ -71,6 +71,16 @@ def start():
     global robot
     data = request.get_json(silent=True) or {}
 
+    # RISK CONTROL: paper trading ONLY. Reject any live-trading request.
+    account_mode = str(data.get('accountMode', data.get('account_mode', ''))).lower()
+    trade_mode = str(data.get('tradeMode', data.get('trade_mode', ''))).lower()
+    account = str(data.get('account', '') or '').lower()
+    if account_mode == 'live' or trade_mode == 'live' or account == 'live':
+        return jsonify({'ok': False, 'error': '安全拦截：本机器人只支持模拟盘，拒绝实盘交易'}), 403
+    # Also reject if caller explicitly passes sandbox=False
+    if data.get('sandbox') is False:
+        return jsonify({'ok': False, 'error': '安全拦截：本机器人只支持模拟盘，拒绝实盘交易'}), 403
+
     # Validate required fields (do NOT log credentials)
     tiger_id = data.get('tigerId') or data.get('tiger_id')
     private_key = data.get('privateKey') or data.get('private_key')
@@ -101,6 +111,7 @@ def start():
         'max_loss': float(data.get('maxLoss', data.get('max_loss', 500))),
         'iv_threshold': float(data.get('ivThreshold', data.get('iv_threshold', 30))),
         'min_days': int(data.get('minDays', data.get('min_days', 30))),
+        'stop_loss_pct': float(data.get('stopLossPct', data.get('stop_loss_pct', 15.0))),
         'account': data.get('account'),  # Optional paper account number
     }
 
@@ -158,6 +169,176 @@ def trades():
     return jsonify({'trades': robot.trades})
 
 
+@app.route('/api/signals', methods=['GET'])
+def signals():
+    """Return current GDC/GD/ladder indicator values + signal per symbol.
+
+    Uses the robot's watched symbols + timeframe. Returns [] when the
+    robot is not running. No credentials in response.
+    """
+    if robot is None:
+        return jsonify({'signals': [], 'running': False})
+    try:
+        sigs = robot.get_signals()
+        return jsonify({'signals': sigs, 'running': robot.running})
+    except Exception as e:
+        logger.error(f"signals error: {type(e).__name__}: {e}")
+        return jsonify({'signals': [], 'running': False, 'error': '获取信号失败'}), 500
+
+
+@app.route('/api/close_all', methods=['POST'])
+def close_all():
+    """Close all open positions (paper trading only).
+
+    Requires the robot to exist. Places opposite market orders for
+    every non-zero position. Returns count closed + per-order results.
+    """
+    if robot is None or not robot.client:
+        return jsonify({'ok': False, 'error': '机器人未启动或未连接'}), 400
+    try:
+        result = robot.close_all_positions()
+        ok = len(result.get('errors', [])) == 0
+        return jsonify({'ok': ok, **result})
+    except Exception as e:
+        logger.error(f"close_all error: {type(e).__name__}: {e}")
+        return jsonify({'ok': False, 'error': '平仓失败，请查看日志'}), 500
+
+
+# === 手动干预模式 API ===
+# 全局手动交易设置：每个持仓的 TP/SL
+MANUAL_TP_SL = {}  # {symbol: {'tp_pct': float, 'sl_pct': float}}
+
+@app.route('/api/mode', methods=['GET', 'POST'])
+def trading_mode():
+    """获取/设置交易模式：auto（AI自动）或 manual（手动干预）"""
+    global TRADING_MODE
+    if request.method == 'GET':
+        return jsonify({'mode': globals().get('TRADING_MODE', 'auto')})
+    data = request.get_json() or {}
+    mode = data.get('mode', 'auto')
+    if mode not in ('auto', 'manual'):
+        return jsonify({'ok': False, 'error': '模式必须是 auto 或 manual'}), 400
+    globals()['TRADING_MODE'] = mode
+    return jsonify({'ok': True, 'mode': mode})
+
+@app.route('/api/manual_buy', methods=['POST'])
+def manual_buy():
+    """手动买入：用户指定股票、数量"""
+    if robot is None or not robot.client:
+        return jsonify({'ok': False, 'error': '机器人未启动或未连接'}), 400
+    data = request.get_json() or {}
+    symbol = data.get('symbol', '').strip().upper()
+    quantity = int(data.get('quantity', 0))
+    if not symbol or quantity <= 0:
+        return jsonify({'ok': False, 'error': '股票代码和数量必填'}), 400
+    try:
+        result = robot.client.place_order(symbol, 'BUY', quantity)
+        if result:
+            return jsonify({'ok': True, 'order_id': result.get('order_id'), 'symbol': symbol, 'quantity': quantity})
+        return jsonify({'ok': False, 'error': '下单失败'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': '下单失败'}), 500
+
+@app.route('/api/manual_sell', methods=['POST'])
+def manual_sell():
+    """手动卖出：用户指定股票、数量"""
+    if robot is None or not robot.client:
+        return jsonify({'ok': False, 'error': '机器人未启动或未连接'}), 400
+    data = request.get_json() or {}
+    symbol = data.get('symbol', '').strip().upper()
+    quantity = int(data.get('quantity', 0))
+    if not symbol or quantity <= 0:
+        return jsonify({'ok': False, 'error': '股票代码和数量必填'}), 400
+    try:
+        result = robot.client.place_order(symbol, 'SELL', quantity)
+        if result:
+            return jsonify({'ok': True, 'order_id': result.get('order_id'), 'symbol': symbol, 'quantity': quantity})
+        return jsonify({'ok': False, 'error': '下单失败'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': '下单失败'}), 500
+
+@app.route('/api/set_tp_sl', methods=['POST'])
+def set_tp_sl():
+    """设置某个持仓的止盈/止损百分比"""
+    data = request.get_json() or {}
+    symbol = data.get('symbol', '').strip().upper()
+    tp_pct = data.get('tp_pct')
+    sl_pct = data.get('sl_pct')
+    if not symbol:
+        return jsonify({'ok': False, 'error': '股票代码必填'}), 400
+    MANUAL_TP_SL[symbol] = {
+        'tp_pct': float(tp_pct) if tp_pct is not None else None,
+        'sl_pct': float(sl_pct) if sl_pct is not None else None,
+    }
+    return jsonify({'ok': True, 'symbol': symbol, **MANUAL_TP_SL[symbol]})
+
+@app.route('/api/get_tp_sl', methods=['GET'])
+def get_tp_sl():
+    """获取所有持仓的 TP/SL 设置"""
+    return jsonify({'tp_sl': MANUAL_TP_SL})
+
+@app.route('/api/option_chain', methods=['GET'])
+def option_chain():
+    """获取某只股票的期权链（用于手动选合约）"""
+    symbol = request.args.get('symbol', '').strip().upper()
+    if not symbol:
+        return jsonify({'ok': False, 'error': '股票代码必填'}), 400
+    if robot is None or not robot.client:
+        return jsonify({'ok': False, 'error': '机器人未启动或未连接'}), 400
+    try:
+        chain = robot.client.get_option_chain(symbol)
+        if not chain:
+            return jsonify({'ok': False, 'error': '无法获取期权链'}), 500
+        # 简化返回：到期日列表
+        return jsonify({'ok': True, 'symbol': symbol, 'chain': chain})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': '获取期权链失败'}), 500
+
+# 手动选择的合约
+SELECTED_CONTRACT = {}
+
+@app.route('/api/select_contract', methods=['POST'])
+def select_contract():
+    """手动选择期权合约"""
+    data = request.get_json() or {}
+    symbol = data.get('symbol', '').strip().upper()
+    contract = data.get('contract', '')
+    if not symbol or not contract:
+        return jsonify({'ok': False, 'error': '股票和合约必填'}), 400
+    SELECTED_CONTRACT[symbol] = contract
+    return jsonify({'ok': True, 'symbol': symbol, 'contract': contract})
+
+@app.route('/api/selected_contract', methods=['GET'])
+def get_selected_contract():
+    """获取已选合约"""
+    return jsonify({'contracts': SELECTED_CONTRACT})
+
+@app.route('/api/stats', methods=['GET'])
+def stats():
+    """Return trading stats: today P&L, total P&L, win rate, trade count.
+
+    Returns zeros when the robot has never run. No credentials in response.
+    """
+    if robot is None:
+        return jsonify({
+            'trades_count': 0,
+            'daily_pnl': 0,
+            'unrealized_pnl': 0,
+            'total_pnl': 0,
+            'win_rate': 0,
+            'winning_trades': 0,
+            'losing_trades': 0,
+            'open_positions': 0,
+            'daily_loss_limit': 0,
+            'daily_loss_exceeded': False,
+        })
+    try:
+        return jsonify(robot.get_stats())
+    except Exception as e:
+        logger.error(f"stats error: {type(e).__name__}: {e}")
+        return jsonify({'error': '获取统计失败'}), 500
+
+
 @app.route('/api/logs', methods=['GET'])
 def logs():
     """Return recent log lines for frontend display."""
@@ -192,6 +373,7 @@ def save_config():
         'max_loss': data.get('maxLoss', data.get('max_loss', 500)),
         'iv_threshold': data.get('ivThreshold', data.get('iv_threshold', 30)),
         'min_days': data.get('minDays', data.get('min_days', 30)),
+        'stop_loss_pct': data.get('stopLossPct', data.get('stop_loss_pct', 15.0)),
         'account': data.get('account', ''),
     }
     return jsonify({'ok': True, 'message': '配置已保存'})
