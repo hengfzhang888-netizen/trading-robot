@@ -1,0 +1,6 @@
+# 华尔街大拿交易机器人 - 后端依赖
+tigeropen>=2.2.0
+flask>=3.0.0
+flask-cors>=4.0.0
+pandas>=2.0.0
+numpy>=1.24.0
