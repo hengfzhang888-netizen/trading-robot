@@ -104,8 +104,8 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </select>
 </div>
 <div class="form-group">
-<label>每次交易金额 (USD)</label>
-<input type="number" id="amount" value="1000" min="100" step="100">
+<label>每次交易仓位 (%)</label>
+<input type="number" id="amount" value="20" min="1" max="100" step="1" placeholder="如 20 = 用账户 20% 交易">
 </div>
 <div class="form-group">
 <label>同时最多持仓</label>
@@ -191,6 +191,16 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 <h2>✋ 手动交易</h2>
 <p style="color:#888;font-size:13px;margin-bottom:12px;">设置点位 → 设置触发 → 系统自动执行</p>
 
+<!-- 0. 选类型 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">0. 交易类型</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<button id="manualTypeStock" onclick="setManualType('stock')" style="flex:1;padding:12px;background:#2196F3;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">正股</button>
+<button id="manualTypeOption" onclick="setManualType('option')" style="flex:1;padding:12px;background:#666;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">期权</button>
+</div>
+<p style="color:#888;font-size:12px;margin-top:4px;">正股：直接买卖股票，没有行权价。期权：选行权价、Call/Put。</p>
+</div>
+
 <!-- 1. 选股票 -->
 <div style="margin-bottom:14px;">
 <label style="color:#fff;font-size:14px;font-weight:bold;">1. 选股票</label>
@@ -227,7 +237,8 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 </div>
 
-<!-- 4. 选期权 -->
+<!-- 4. 选期权（仅期权显示，正股隐藏） -->
+<div id="manualOptionSection">
 <div style="margin-bottom:14px;">
 <label style="color:#fff;font-size:14px;font-weight:bold;">4. 选期权</label>
 <div style="display:flex;gap:8px;margin-top:6px;">
@@ -236,8 +247,10 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 <option value="CALL">Call（看涨）</option>
 <option value="PUT">Put（看跌）</option>
 </select>
-<input id="manualQty" type="number" value="1" placeholder="数量" style="width:80px;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
+<input id="manualQty" type="number" value="1" placeholder="数量（张/股）" title="期权填张数，正股填股数" style="width:80px;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
 </div>
+</div>
+
 </div>
 
 <!-- 5. 设止盈止损 -->
@@ -512,6 +525,31 @@ document.addEventListener('DOMContentLoaded', function() {
         if (custom) custom.style.display = this.value === 'custom' ? 'flex' : 'none';
     });
 });
+
+// 手动交易类型切换：正股 / 期权
+function setManualType(type) {
+    const stockBtn = document.getElementById('manualTypeStock');
+    const optionBtn = document.getElementById('manualTypeOption');
+    const optionSection = document.getElementById('manualOptionSection');
+    const triggerSelect = document.getElementById('manualTrigger');
+    if (type === 'stock') {
+        stockBtn.style.background = '#2196F3';
+        optionBtn.style.background = '#666';
+        if (optionSection) optionSection.style.display = 'none';
+        // 正股触发：买 / 卖
+        if (triggerSelect) {
+            triggerSelect.innerHTML = '<option value="gdc_red">GDC 变红 → 买入</option><option value="gdc_green">GDC 变绿 → 卖出</option><option value="price">价格到点位 → 买卖</option><option value="both">GDC + 点位都满足 → 买卖</option>';
+        }
+    } else {
+        stockBtn.style.background = '#666';
+        optionBtn.style.background = '#FF9800';
+        if (optionSection) optionSection.style.display = 'block';
+        // 期权触发：买 Call / 买 Put
+        if (triggerSelect) {
+            triggerSelect.innerHTML = '<option value="gdc_red">GDC 变红 → 买 Call</option><option value="gdc_green">GDC 变绿 → 买 Put</option><option value="price">价格到点位 → 买卖</option><option value="both">GDC + 点位都满足 → 买卖</option>';
+        }
+    }
+}
 
 // 手动买入
 async function manualBuy() {
