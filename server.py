@@ -162,6 +162,40 @@ def positions():
         return jsonify({'positions': [], 'error': str(e)}), 500
 
 
+@app.route('/api/quotes', methods=['GET'])
+def quotes():
+    """获取选中股票的实时报价（独立于机器人运行状态，像股票机器人一样）"""
+    symbols_param = request.args.get('symbols', '')
+    if not symbols_param:
+        return jsonify({'ok': False, 'error': '未指定股票'}), 400
+    symbols = [s.strip().upper() for s in symbols_param.split(',') if s.strip()]
+    # 获取 Tiger 客户端（即使机器人未启动，也从保存的配置创建）
+    client = None
+    if robot is not None and robot.client:
+        client = robot.client
+    else:
+        try:
+            from tiger_client import TigerClient
+            cfg = SAVED_CONFIG or {}
+            tiger_id = cfg.get('tiger_id')
+            private_key = cfg.get('private_key')
+            account_num = cfg.get('account')
+            if tiger_id and private_key:
+                client = TigerClient(tiger_id, private_key, account_num)
+        except Exception as e:
+            logger.error(f"quotes client error: {e}")
+    if not client:
+        return jsonify({'ok': False, 'error': '未配置 Tiger API'}), 400
+    results = {}
+    for sym in symbols:
+        try:
+            q = client.get_quote(sym)
+            if q:
+                results[sym] = q
+        except Exception as e:
+            logger.error(f"quote {sym} error: {e}")
+    return jsonify({'ok': True, 'quotes': results})
+
 @app.route('/api/account', methods=['GET'])
 def account():
     # 即使机器人未启动，也要显示账户余额（联动老虎）

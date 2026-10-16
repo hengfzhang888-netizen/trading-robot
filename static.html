@@ -79,10 +79,10 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 <div id="modeDesc" style="text-align:center;color:#aaa;font-size:14px;margin-bottom:15px;">当前模式：AI 自动交易 - AI 自己看指标，自己买卖</div>
 
-<!-- 股票小卡片（实时股价，像股票机器人一样） -->
-<div class="card">
-<h2>📊 股票实时价格</h2>
-<div id="stockCards" style="display:flex;gap:10px;flex-wrap:wrap;overflow-x:auto;">
+<!-- 股票小卡片（股票机器人样式：代码+中文名+价格+涨跌幅+趋势线+信号） -->
+<div class="card" style="background:#f0f8ff;">
+<h2 style="color:#333;">📊 自选股票检测</h2>
+<div id="stockCards" style="display:flex;flex-direction:column;gap:12px;">
 <div style="color:#888;">加载中...</div>
 </div>
 </div>
@@ -398,6 +398,8 @@ document.querySelectorAll('.stock-tag').forEach(tag => {
             selectedStocks.add(sym);
             tag.classList.add('selected');
         }
+        // 选股联动：选了股票，卡片立即更新
+        if (typeof updateStockCards === 'function') updateStockCards();
         updateSelectedDisplay();
     });
 });
@@ -448,6 +450,8 @@ function addStockFromSearch(symbol) {
         if (tag) tag.classList.add('selected');
         updateSelectedDisplay();
         addLog(`已添加股票: ${symbol}`, 'info');
+        // 选股联动：选了股票，卡片立即更新
+        if (typeof updateStockCards === 'function') updateStockCards();
     } else {
         addLog(`股票 ${symbol} 已在列表中`, 'warn');
     }
@@ -920,42 +924,63 @@ async function closeAllPositions() {
 
 function startPolling() {
     stopPolling();
-    // 更新股票小卡片
+    // 股票名称映射
+    const STOCK_NAMES = {
+        'TSLA': '特斯拉', 'AAPL': '苹果', 'NVDA': '英伟达', 'MSFT': '微软',
+        'GOOG': '谷歌', 'GOOGL': '谷歌', 'META': 'Meta平台', 'AMZN': '亚马逊',
+        'SPY': '标普500', 'QQQ': '纳指100', 'COIN': 'Coinbase', 'MU': '美光科技',
+        'AMD': 'AMD', 'AVGO': '博通', 'TSM': '台积电', 'PLTR': 'Palantir'
+    };
+    // 更新股票小卡片（股票机器人样式，独立于机器人运行）
     async function updateStockCards() {
         try {
             const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
-            const resp = await fetch(`${apiUrl}/api/signals`);
-            const data = await resp.json();
             const container = document.getElementById('stockCards');
             if (!container) return;
-            const signals = data.signals || {};
-            const symbols = Object.keys(signals);
-            if (symbols.length === 0) {
-                // 如果没有信号，显示选中的股票
-                const selected = ['TSLA', 'AAPL', 'NVDA', 'SPY', 'QQQ'];
-                container.innerHTML = selected.map(s => `
-                    <div style="min-width:140px;padding:12px;background:#1a1a1a;border-radius:8px;border:1px solid #333;flex:1;">
-                        <div style="font-weight:bold;font-size:16px;color:#fff;">${s}</div>
-                        <div style="color:#888;font-size:12px;">等待信号...</div>
-                    </div>
-                `).join('');
+            // 从选股获取（联动选股，选了哪个股票，卡片就显示哪个）
+            const selected = (typeof selectedStocks !== 'undefined' && selectedStocks.size > 0) ? Array.from(selectedStocks) : ['TSLA', 'NVDA', 'AAPL', 'GOOG', 'GOOGL', 'QQQ', 'SPY'];
+            const symbols = selected.slice(0, 10);
+            const resp = await fetch(`${apiUrl}/api/quotes?symbols=${symbols.join(',')}`);
+            const data = await resp.json();
+            if (!data.ok || !data.quotes) {
+                container.innerHTML = '<div style="color:#888;">请先保存 Tiger 配置</div>';
                 return;
             }
+            const quotes = data.quotes;
+            const now = new Date();
+            const timeStr = now.toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
             container.innerHTML = symbols.map(sym => {
-                const sig = signals[sym] || {};
-                const price = sig.price || 0;
-                const gdc = sig.gdc_color || 'unknown';
-                const color = gdc === 'red' ? '#FF5252' : gdc === 'green' ? '#4CAF50' : '#888';
-                const gdcText = gdc === 'red' ? '🔴 GDC红' : gdc === 'green' ? '🟢 GDC绿' : '⚪ GDC';
+                const q = quotes[sym] || {};
+                const price = q.latest_price || q.close || 0;
+                const prevClose = q.prev_close || price;
+                const changePct = prevClose ? ((price - prevClose) / prevClose * 100) : 0;
+                const isUp = changePct >= 0;
+                const color = isUp ? '#FF3B30' : '#00A86B';
+                const name = STOCK_NAMES[sym] || sym;
+                // 趋势线颜色
+                const lineColor = isUp ? '#FF3B30' : '#00A86B';
                 return `
-                    <div style="min-width:140px;padding:12px;background:#1a1a1a;border-radius:8px;border:1px solid #333;flex:1;">
-                        <div style="font-weight:bold;font-size:16px;color:#fff;">${sym}</div>
-                        <div style="font-size:20px;font-weight:bold;color:#fff;">$${Number(price).toFixed(2)}</div>
-                        <div style="color:${color};font-size:12px;">${gdcText}</div>
+                    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                            <div>
+                                <div style="font-weight:bold;font-size:18px;color:#1a1a1a;">US.${sym}（${name}）</div>
+                                <div style="color:${color};font-size:16px;font-weight:bold;">${isUp ? '+' : ''}${changePct.toFixed(2)}%</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:28px;font-weight:bold;color:${color};">${Number(price).toFixed(3)}</div>
+                                <div style="color:#888;font-size:12px;">Tiger · ${timeStr}</div>
+                            </div>
+                        </div>
+                        <div style="height:2px;background:${lineColor};margin:12px 0;border-radius:1px;"></div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="background:#f0f0f0;padding:4px 12px;border-radius:20px;font-size:13px;color:#333;">等待信号</span>
+                        </div>
                     </div>
                 `;
             }).join('');
-        } catch (e) {}
+        } catch (e) {
+            console.error('updateStockCards error:', e);
+        }
     }
     setInterval(updateStockCards, 1000);
     updateStockCards();
