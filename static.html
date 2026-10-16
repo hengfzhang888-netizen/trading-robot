@@ -690,10 +690,10 @@ async function startRobot() {
         return;
     }
     
-    // 大额确认：单笔金额超过 1000 美元时二次确认
+    // 大仓位确认：仓位超过 50% 时二次确认
     const amountVal = parseFloat(document.getElementById('amount').value) || 0;
-    if (amountVal > 1000) {
-        const ok = confirm(`⚠️ 大额确认\n\n单笔交易金额 $${amountVal} 超过 $1000。\n\n模拟盘测试建议先用小金额。\n\n确定要以 $${amountVal} 启动吗？`);
+    if (amountVal > 50) {
+        const ok = confirm(`⚠️ 大仓位确认\n\n每次交易仓位 ${amountVal}% 超过 50%。\n\n模拟盘测试建议先用小仓位。\n\n确定要以 ${amountVal}% 启动吗？`);
         if (!ok) return;
     }
     
