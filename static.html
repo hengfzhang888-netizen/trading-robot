@@ -79,15 +79,6 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 <div id="modeDesc" style="text-align:center;color:#aaa;font-size:14px;margin-bottom:15px;">当前模式：AI 自动交易 - AI 自己看指标，自己买卖</div>
 
-<div class="status">
-<div class="status-item"><div class="label">机器人状态</div><div class="value" id="status">已停止</div></div>
-<div class="status-item"><div class="label">今日盈亏</div><div class="value" id="pnl">$0.00</div></div>
-<div class="status-item"><div class="label">总盈亏（含浮亏）</div><div class="value" id="totalPnl">$0.00</div></div>
-<div class="status-item"><div class="label">胜率</div><div class="value" id="winRate">—</div></div>
-<div class="status-item"><div class="label">持仓数量</div><div class="value" id="positions">0</div></div>
-<div class="status-item"><div class="label">今日交易</div><div class="value" id="trades">0</div></div>
-</div>
-
 <div class="grid">
 <div class="card">
 <h2>⚙️ 交易设置</h2>
@@ -195,43 +186,81 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 
 <!-- 手动干预面板（默认隐藏，切到手动模式显示） -->
+<!-- 手动交易完整版：点位 + 触发 + 止盈止损 -->
 <div class="card" id="manualPanel" style="display:none;">
 <h2>✋ 手动交易</h2>
-<p style="color:#888; font-size:13px; margin-bottom:10px;">选股票 → 选期权 → 设止盈止损 → 系统按 GDC 信号自动买卖</p>
+<p style="color:#888;font-size:13px;margin-bottom:12px;">设置点位 → 设置触发 → 系统自动执行</p>
 
-<!-- 选股票 -->
-<div style="margin-bottom:12px;">
-<label style="color:#aaa;font-size:13px;">1. 选股票</label>
-<div style="display:flex;gap:8px;margin-top:4px;">
-<input id="manualSymbol" placeholder="股票代码，如 TSLA" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
-<button onclick="loadOptionChain()" style="padding:10px 16px;background:#2196F3;color:white;border:none;border-radius:6px;cursor:pointer;">查看期权</button>
-</div>
-</div>
-
-<!-- 选期权 -->
-<div style="margin-bottom:12px;">
-<label style="color:#aaa;font-size:13px;">2. 选期权合约（点选）</label>
-<div id="optionChainList" style="margin-top:4px;max-height:200px;overflow-y:auto;background:#111;border-radius:6px;padding:8px;">
-<div style="color:#888;font-size:13px;">输入股票代码后点"查看期权"</div>
+<!-- 1. 选股票 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">1. 选股票</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<input id="manualSymbol" placeholder="股票代码，如 TSLA" style="flex:1;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
 </div>
 </div>
 
-<!-- 设止盈止损 -->
-<div style="margin-bottom:12px;">
-<label style="color:#aaa;font-size:13px;">3. 设止盈止损（%）</label>
-<div style="display:flex;gap:8px;margin-top:4px;">
-<input id="manualTP" type="number" placeholder="止盈 %，如 30" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
-<input id="manualSL" type="number" placeholder="止损 %，如 10" style="flex:1;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
+<!-- 2. 设点位 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">2. 设点位（价格到了自动买卖）</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<div style="flex:1;">
+<label style="color:#aaa;font-size:12px;">买入价（价格跌到这里买）</label>
+<input id="manualBuyPrice" type="number" placeholder="如 250.00" style="width:100%;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;margin-top:4px;">
+</div>
+<div style="flex:1;">
+<label style="color:#aaa;font-size:12px;">卖出价（价格涨到这里卖）</label>
+<input id="manualSellPrice" type="number" placeholder="如 260.00" style="width:100%;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;margin-top:4px;">
+</div>
 </div>
 </div>
 
-<!-- 买入卖出 -->
-<div style="display:flex;gap:8px;margin-bottom:10px;">
-<input id="manualQty" type="number" placeholder="数量" value="1" style="width:100px;padding:10px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;">
-<button onclick="manualBuy()" style="flex:1;padding:12px;background:#4CAF50;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">买入 Call</button>
-<button onclick="manualSell()" style="flex:1;padding:12px;background:#f44336;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">卖出 / 买 Put</button>
+<!-- 3. 设触发 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">3. 设触发（GDC 信号）</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<select id="manualTrigger" style="flex:1;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
+<option value="gdc_red">GDC 变红 → 买 Call</option>
+<option value="gdc_green">GDC 变绿 → 买 Put</option>
+<option value="price">价格到点位 → 买卖</option>
+<option value="both">GDC + 点位都满足 → 买卖</option>
+</select>
 </div>
-<p style="color:#888;font-size:12px;">逻辑：GDC 红 → 买 Call，GDC 绿 → 买 Put。止盈止损到了自动卖。持仓列表里也可单独设每个仓的止盈止损。</p>
+</div>
+
+<!-- 4. 选期权 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">4. 选期权</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<input id="manualStrike" type="number" placeholder="行权价，如 250" style="flex:1;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
+<select id="manualRight" style="padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
+<option value="CALL">Call（看涨）</option>
+<option value="PUT">Put（看跌）</option>
+</select>
+<input id="manualQty" type="number" value="1" placeholder="数量" style="width:80px;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;">
+</div>
+</div>
+
+<!-- 5. 设止盈止损 -->
+<div style="margin-bottom:14px;">
+<label style="color:#fff;font-size:14px;font-weight:bold;">5. 设止盈止损（%）</label>
+<div style="display:flex;gap:8px;margin-top:6px;">
+<div style="flex:1;">
+<label style="color:#aaa;font-size:12px;">止盈：盈利到多少 % 自动卖</label>
+<input id="manualTP" type="number" value="30" placeholder="如 30" style="width:100%;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;margin-top:4px;">
+</div>
+<div style="flex:1;">
+<label style="color:#aaa;font-size:12px;">止损：亏损到多少 % 自动卖</label>
+<input id="manualSL" type="number" value="10" placeholder="如 10" style="width:100%;padding:12px;border-radius:6px;border:1px solid #444;background:#1a1a1a;color:#fff;font-size:15px;margin-top:4px;">
+</div>
+</div>
+<p style="color:#888;font-size:12px;margin-top:6px;">例如：止盈 30%，盈利到 30% 系统自动卖出。止损 10%，亏损到 10% 系统自动卖出。</p>
+</div>
+
+<!-- 执行按钮 -->
+<div style="display:flex;gap:8px;">
+<button onclick="manualBuy()" style="flex:1;padding:14px;background:#4CAF50;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">开始手动交易</button>
+<button onclick="manualSell()" style="flex:1;padding:14px;background:#f44336;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">停止 / 卖出</button>
+</div>
 </div>
 
 <!-- 交易时段设置 -->
@@ -926,5 +955,13 @@ window.onload = async () => {
     refreshDashboard();
 };
 </script>
+<div class="status" style="margin-top:20px;">
+<div class="status-item"><div class="label">机器人状态</div><div class="value" id="status">已停止</div></div>
+<div class="status-item"><div class="label">今日盈亏</div><div class="value" id="pnl">$0.00</div></div>
+<div class="status-item"><div class="label">总盈亏（含浮亏）</div><div class="value" id="totalPnl">$0.00</div></div>
+<div class="status-item"><div class="label">胜率</div><div class="value" id="winRate">—</div></div>
+<div class="status-item"><div class="label">持仓数量</div><div class="value" id="positions">0</div></div>
+<div class="status-item"><div class="label">今日交易</div><div class="value" id="trades">0</div></div>
+</div>
 </body>
 </html>
