@@ -520,14 +520,24 @@ class TradingRobot:
             self._log(f"{symbol}: 下单失败", 'error')
 
     def _calc_smart_position_size(self, symbol: str, signal_strength: float, current_price: float) -> float:
-        """智能仓位计算：模拟真人操作。
+        """智能仓位计算：按账户余额百分比，模拟真人操作。
+        - 不固定金额，按账户总资金算
         - 信号强度：三指标全对齐 = 1.0，两指标对齐 = 0.7，单指标 = 0.4
-        - 基础金额 * 信号强度 = 建议金额
+        - 基础 = 可用资金 * 20% * 信号强度
         - 再经过 30% 预留检查
         """
         try:
-            base = self.amount
-            # 信号强度调整：强信号全仓，弱信号半仓
+            # 获取账户余额
+            account = self.client.get_account() if self.client else None
+            if account:
+                total = float(account.get('total', 0) or account.get('cash', 0) or 0)
+                if total <= 0:
+                    total = self.amount  # 兜底
+            else:
+                total = self.amount
+            # 基础 = 总资金 * 20%（每次交易用 20%）
+            base = total * 0.20
+            # 信号强度调整：强信号全额，弱信号减少
             adjusted = base * max(0.4, min(1.0, signal_strength))
             # 30% 预留检查
             return self._check_position_reserve(adjusted)

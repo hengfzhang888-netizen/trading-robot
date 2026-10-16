@@ -716,7 +716,7 @@ async function closeAllPositions() {
 
 function startPolling() {
     stopPolling();
-    pollTimer = setInterval(async () => {
+    pollTimer = setInterval(async () => { // 1秒刷新，实时显示
         const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
         try {
             const resp = await fetch(`${apiUrl}/api/status`);
@@ -747,7 +747,7 @@ function startPolling() {
         }
         // Refresh dashboard panels (signals / positions / trades / stats)
         await refreshDashboard();
-    }, 5000);
+    }, 1000);
 }
 function stopPolling() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }

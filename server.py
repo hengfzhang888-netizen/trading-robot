@@ -294,6 +294,29 @@ def option_chain():
     except Exception as e:
         return jsonify({'ok': False, 'error': '获取期权链失败'}), 500
 
+# 交易时段设置
+TRADING_SESSION = {
+    'mode': 'all_day',  # all_day / custom / off
+    'start_time': '09:30',  # HH:MM
+    'end_time': '16:00',
+}
+
+@app.route('/api/trading_session', methods=['GET', 'POST'])
+def trading_session():
+    """获取/设置交易时段"""
+    if request.method == 'GET':
+        return jsonify({'ok': True, **TRADING_SESSION})
+    data = request.get_json() or {}
+    mode = data.get('mode', 'all_day')
+    if mode not in ('all_day', 'custom', 'off'):
+        return jsonify({'ok': False, 'error': '模式错误'}), 400
+    TRADING_SESSION['mode'] = mode
+    if 'start_time' in data:
+        TRADING_SESSION['start_time'] = data['start_time']
+    if 'end_time' in data:
+        TRADING_SESSION['end_time'] = data['end_time']
+    return jsonify({'ok': True, **TRADING_SESSION})
+
 # 手动选择的合约
 SELECTED_CONTRACT = {}
 
