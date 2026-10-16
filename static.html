@@ -79,6 +79,14 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 <div id="modeDesc" style="text-align:center;color:#aaa;font-size:14px;margin-bottom:15px;">当前模式：AI 自动交易 - AI 自己看指标，自己买卖</div>
 
+<!-- 股票小卡片（实时股价，像股票机器人一样） -->
+<div class="card">
+<h2>📊 股票实时价格</h2>
+<div id="stockCards" style="display:flex;gap:10px;flex-wrap:wrap;overflow-x:auto;">
+<div style="color:#888;">加载中...</div>
+</div>
+</div>
+
 <!-- 账户余额（联动老虎） -->
 <div class="card" style="background:linear-gradient(135deg,#1a2a3a,#1a1a1a);border:1px solid #2196F3;">
 <h2>💰 账户余额（联动老虎）</h2>
@@ -576,9 +584,29 @@ async function manualBuy() {
     const symbol = document.getElementById('manualSymbol').value.trim().toUpperCase();
     const qty = parseInt(document.getElementById('manualQty').value);
     if (!symbol || !qty || qty <= 0) { alert('请填写股票代码和数量'); return; }
-    const r = await fetch(API_URL + '/api/manual_buy', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({symbol, quantity: qty})});
+    // 读取点位、触发、期权、止盈止损（全部接线）
+    const buyPrice = document.getElementById('manualBuyPrice') ? parseFloat(document.getElementById('manualBuyPrice').value) || null : null;
+    const sellPrice = document.getElementById('manualSellPrice') ? parseFloat(document.getElementById('manualSellPrice').value) || null : null;
+    const trigger = document.getElementById('manualTrigger') ? document.getElementById('manualTrigger').value : 'gdc_red';
+    const strike = document.getElementById('manualStrike') ? parseFloat(document.getElementById('manualStrike').value) || null : null;
+    const right = document.getElementById('manualRight') ? document.getElementById('manualRight').value : 'CALL';
+    const tp = document.getElementById('manualTP') ? parseFloat(document.getElementById('manualTP').value) || null : null;
+    const sl = document.getElementById('manualSL') ? parseFloat(document.getElementById('manualSL').value) || null : null;
+    const payload = {symbol, quantity: qty, buy_price: buyPrice, sell_price: sellPrice, trigger, strike, right, tp_pct: tp, sl_pct: sl};
+    const r = await fetch(API_URL + '/api/manual_buy', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const d = await r.json();
-    alert(d.ok ? '买入成功，订单号 ' + d.order_id : '买入失败：' + d.error);
+    if (d.ok) {
+        let msg = '已设置手动交易：' + symbol;
+        if (buyPrice) msg += '\n买入价 $' + buyPrice;
+        if (sellPrice) msg += '\n卖出价 $' + sellPrice;
+        if (tp) msg += '\n止盈 ' + tp + '%';
+        if (sl) msg += '\n止损 ' + sl + '%';
+        if (d.order_id) msg += '\n订单号 ' + d.order_id;
+        if (d.pending) msg += '\n（等待条件触发）';
+        alert(msg);
+    } else {
+        alert('设置失败：' + d.error);
+    }
     loadPositions();
 }
 // 手动卖出
@@ -892,6 +920,46 @@ async function closeAllPositions() {
 
 function startPolling() {
     stopPolling();
+    // 更新股票小卡片
+    async function updateStockCards() {
+        try {
+            const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
+            const resp = await fetch(`${apiUrl}/api/signals`);
+            const data = await resp.json();
+            const container = document.getElementById('stockCards');
+            if (!container) return;
+            const signals = data.signals || {};
+            const symbols = Object.keys(signals);
+            if (symbols.length === 0) {
+                // 如果没有信号，显示选中的股票
+                const selected = ['TSLA', 'AAPL', 'NVDA', 'SPY', 'QQQ'];
+                container.innerHTML = selected.map(s => `
+                    <div style="min-width:140px;padding:12px;background:#1a1a1a;border-radius:8px;border:1px solid #333;flex:1;">
+                        <div style="font-weight:bold;font-size:16px;color:#fff;">${s}</div>
+                        <div style="color:#888;font-size:12px;">等待信号...</div>
+                    </div>
+                `).join('');
+                return;
+            }
+            container.innerHTML = symbols.map(sym => {
+                const sig = signals[sym] || {};
+                const price = sig.price || 0;
+                const gdc = sig.gdc_color || 'unknown';
+                const color = gdc === 'red' ? '#FF5252' : gdc === 'green' ? '#4CAF50' : '#888';
+                const gdcText = gdc === 'red' ? '🔴 GDC红' : gdc === 'green' ? '🟢 GDC绿' : '⚪ GDC';
+                return `
+                    <div style="min-width:140px;padding:12px;background:#1a1a1a;border-radius:8px;border:1px solid #333;flex:1;">
+                        <div style="font-weight:bold;font-size:16px;color:#fff;">${sym}</div>
+                        <div style="font-size:20px;font-weight:bold;color:#fff;">$${Number(price).toFixed(2)}</div>
+                        <div style="color:${color};font-size:12px;">${gdcText}</div>
+                    </div>
+                `;
+            }).join('');
+        } catch (e) {}
+    }
+    setInterval(updateStockCards, 1000);
+    updateStockCards();
+
     pollTimer = setInterval(async () => { // 1秒刷新，实时显示
         const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
         try {

@@ -164,10 +164,27 @@ def positions():
 
 @app.route('/api/account', methods=['GET'])
 def account():
-    if robot is None or not robot.client:
-        return jsonify({'ok': False, 'error': '机器人未启动'})
+    # 即使机器人未启动，也要显示账户余额（联动老虎）
+    client = None
+    if robot is not None and robot.client:
+        client = robot.client
+    else:
+        # 机器人未启动，从保存的配置创建 Tiger 客户端
+        try:
+            from tiger_client import TigerClient
+            cfg = SAVED_CONFIG or {}
+            tiger_id = cfg.get('tiger_id')
+            private_key = cfg.get('private_key')
+            account_num = cfg.get('account')
+            if tiger_id and private_key:
+                client = TigerClient(tiger_id, private_key, account_num)
+        except Exception as e:
+            logger.error(f"account client create error: {e}")
+            return jsonify({'ok': False, 'error': '未配置 Tiger API，请先保存配置'}), 400
+    if not client:
+        return jsonify({'ok': False, 'error': '未配置 Tiger API，请先保存配置'}), 400
     try:
-        acc = robot.client.get_account()
+        acc = client.get_account()
         if acc:
             return jsonify({'ok': True, 'account': acc})
         else:
@@ -238,21 +255,94 @@ def trading_mode():
 
 @app.route('/api/manual_buy', methods=['POST'])
 def manual_buy():
-    """手动买入：用户指定股票、数量"""
+    """手动买入：用户指定股票、数量、点位、触发、期权、止盈止损"""
     if robot is None or not robot.client:
         return jsonify({'ok': False, 'error': '机器人未启动或未连接'}), 400
     data = request.get_json() or {}
     symbol = data.get('symbol', '').strip().upper()
     quantity = int(data.get('quantity', 0))
+    buy_price = data.get('buy_price')
+    sell_price = data.get('sell_price')
+    trigger = data.get('trigger', 'gdc_red')
+    strike = data.get('strike')
+    right = data.get('right', 'CALL')
+    tp_pct = data.get('tp_pct')
+    sl_pct = data.get('sl_pct')
     if not symbol or quantity <= 0:
         return jsonify({'ok': False, 'error': '股票代码和数量必填'}), 400
+    # 期权手动下单：根据行权价和 Call/Put，从期权链找合约
+    if strike:
+        try:
+            chain = robot.client.get_option_chain(symbol)
+            if not chain or not chain.get('expirations'):
+                return jsonify({'ok': False, 'error': '无法获取期权链'}), 500
+            # 用最近的到期日
+            target_expiry = chain['expirations'][0]
+            # 找匹配的合约
+            contracts = chain.get('contracts', {}).get(target_expiry, [])
+            best = None
+            for c in contracts:
+                if abs(float(c.get('strike', 0)) - float(strike)) < 0.01 and c.get('right', '').upper() == right.upper():
+                    best = c
+                    break
+            if not best:
+                return jsonify({'ok': False, 'error': f'找不到行权价 {strike} 的 {right} 合约'}), 400
+            identifier = best.get('identifier') or f"{symbol} {target_expiry} {right}"
+            # 如果设置了买入价，创建待触发期权订单
+            if buy_price:
+                if not hasattr(robot, 'pending_orders'):
+                    robot.pending_orders = []
+                robot.pending_orders.append({
+                    'symbol': symbol, 'quantity': quantity, 'buy_price': buy_price,
+                    'sell_price': sell_price, 'trigger': trigger, 'strike': strike,
+                    'right': right, 'identifier': identifier, 'expiry': target_expiry,
+                    'tp_pct': tp_pct, 'sl_pct': sl_pct, 'side': 'BUY', 'type': 'option'
+                })
+                return jsonify({'ok': True, 'pending': True, 'symbol': symbol, 'quantity': quantity, 'strike': strike, 'right': right, 'buy_price': buy_price, 'message': '已设置待触发期权订单'})
+            # 立即下单期权
+            result = robot.client.place_order(identifier, 'BUY', quantity)
+            if result:
+                if tp_pct is not None or sl_pct is not None:
+                    try:
+                        robot.client.set_tp_sl(identifier, tp_pct, sl_pct)
+                    except Exception:
+                        pass
+                return jsonify({'ok': True, 'order_id': result.get('order_id'), 'symbol': symbol, 'quantity': quantity, 'strike': strike, 'right': right, 'identifier': identifier})
+            return jsonify({'ok': False, 'error': '期权下单失败'}), 500
+        except Exception as e:
+            logger.error(f"manual option buy error: {e}")
+            return jsonify({'ok': False, 'error': '期权下单失败: ' + str(e)}), 500
     try:
+        # 如果设置了买入价，创建待触发订单（价格到了才买）
+        if buy_price:
+            # 保存待触发订单
+            if not hasattr(robot, 'pending_orders'):
+                robot.pending_orders = []
+            robot.pending_orders.append({
+                'symbol': symbol, 'quantity': quantity, 'buy_price': buy_price,
+                'sell_price': sell_price, 'trigger': trigger,
+                'tp_pct': tp_pct, 'sl_pct': sl_pct, 'side': 'BUY'
+            })
+            # 保存止盈止损
+            if tp_pct is not None or sl_pct is not None:
+                if not hasattr(robot, 'manual_tp_sl'):
+                    robot.manual_tp_sl = {}
+                robot.manual_tp_sl[symbol] = {'tp_pct': tp_pct, 'sl_pct': sl_pct}
+            return jsonify({'ok': True, 'pending': True, 'symbol': symbol, 'quantity': quantity, 'buy_price': buy_price, 'message': '已设置待触发订单，价格到 $%.2f 自动买入' % buy_price})
+        # 无买入价，立即下单
         result = robot.client.place_order(symbol, 'BUY', quantity)
         if result:
-            return jsonify({'ok': True, 'order_id': result.get('order_id'), 'symbol': symbol, 'quantity': quantity})
+            # 保存止盈止损
+            if tp_pct is not None or sl_pct is not None:
+                try:
+                    robot.client.set_tp_sl(symbol, tp_pct, sl_pct)
+                except Exception:
+                    pass
+            return jsonify({'ok': True, 'order_id': result.get('order_id'), 'symbol': symbol, 'quantity': quantity, 'tp_pct': tp_pct, 'sl_pct': sl_pct})
         return jsonify({'ok': False, 'error': '下单失败'}), 500
     except Exception as e:
-        return jsonify({'ok': False, 'error': '下单失败'}), 500
+        logger.error(f"manual_buy error: {e}")
+        return jsonify({'ok': False, 'error': '下单失败: ' + str(e)}), 500
 
 @app.route('/api/manual_sell', methods=['POST'])
 def manual_sell():
