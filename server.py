@@ -162,6 +162,21 @@ def positions():
         return jsonify({'positions': [], 'error': str(e)}), 500
 
 
+@app.route('/api/account', methods=['GET'])
+def account():
+    if robot is None or not robot.client:
+        return jsonify({'ok': False, 'error': '机器人未启动'})
+    try:
+        acc = robot.client.get_account()
+        if acc:
+            return jsonify({'ok': True, 'account': acc})
+        else:
+            return jsonify({'ok': False, 'error': '无法获取账户信息'})
+    except Exception as e:
+        logger.error(f"account error: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/api/trades', methods=['GET'])
 def trades():
     if robot is None:

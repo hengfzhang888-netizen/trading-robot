@@ -79,6 +79,26 @@ h1 { text-align: center; color: #ffd700; margin-bottom: 10px; font-size: 28px; }
 </div>
 <div id="modeDesc" style="text-align:center;color:#aaa;font-size:14px;margin-bottom:15px;">当前模式：AI 自动交易 - AI 自己看指标，自己买卖</div>
 
+<!-- 账户余额（联动老虎） -->
+<div class="card" style="background:linear-gradient(135deg,#1a2a3a,#1a1a1a);border:1px solid #2196F3;">
+<h2>💰 账户余额（联动老虎）</h2>
+<div style="display:flex;gap:15px;flex-wrap:wrap;">
+<div style="flex:1;min-width:120px;">
+<div style="color:#aaa;font-size:12px;">总资产</div>
+<div id="accountTotal" style="color:#fff;font-size:24px;font-weight:bold;">--</div>
+</div>
+<div style="flex:1;min-width:120px;">
+<div style="color:#aaa;font-size:12px;">可用现金</div>
+<div id="accountCash" style="color:#4CAF50;font-size:24px;font-weight:bold;">--</div>
+</div>
+<div style="flex:1;min-width:120px;">
+<div style="color:#aaa;font-size:12px;">持仓市值</div>
+<div id="accountPositionValue" style="color:#FF9800;font-size:24px;font-weight:bold;">--</div>
+</div>
+</div>
+<p style="color:#888;font-size:11px;margin-top:8px;">每 1 秒同步一次，与老虎 App 一致</p>
+</div>
+
 <div class="grid">
 <div class="card">
 <h2>⚙️ 交易设置</h2>
@@ -875,6 +895,23 @@ function startPolling() {
     pollTimer = setInterval(async () => { // 1秒刷新，实时显示
         const apiUrl = window.API_URL || 'https://striking-connection-production-5019.up.railway.app';
         try {
+            // 更新账户余额（联动老虎）
+            try {
+                const accResp = await fetch(`${apiUrl}/api/account`);
+                const accData = await accResp.json();
+                if (accData.ok && accData.account) {
+                    const acc = accData.account;
+                    const total = acc.total_assets || acc.net_liquidation || acc.total || 0;
+                    const cash = acc.cash || acc.available_funds || acc.buying_power || 0;
+                    const posVal = total - cash;
+                    const totalEl = document.getElementById('accountTotal');
+                    const cashEl = document.getElementById('accountCash');
+                    const posEl = document.getElementById('accountPositionValue');
+                    if (totalEl) totalEl.textContent = '$' + Number(total).toFixed(2);
+                    if (cashEl) cashEl.textContent = '$' + Number(cash).toFixed(2);
+                    if (posEl) posEl.textContent = '$' + Number(posVal).toFixed(2);
+                }
+            } catch (e) {}
             const resp = await fetch(`${apiUrl}/api/status`);
             const data = await resp.json();
             if (data.running !== undefined) {
